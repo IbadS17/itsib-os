@@ -1,0 +1,28 @@
+# Compiled kernel artifacts
+kernel/*.o
+kernel/*.elf
+
+# Generated bootable images
+*.iso
+
+# Build outputs and temporary files
+build/
+dist/
+*.log
+*.tmp
+
+# Editor and OS files
+.vscode/
+.idea/
+.DS_Store
+*~
+
+# Generated ISO staging files
+/iso/boot/
+/iso/EFI/
+
+# Generated kernel objects and ISO staging
+/kernel/main.o
+/iso/boot/
+/iso/EFI/
+/kernel/src/*.o
