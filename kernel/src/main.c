@@ -1,6 +1,8 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <limine.h>
+#include <stdbool.h>
+
 
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile uint64_t limine_requests_start_marker[] =
@@ -35,16 +37,34 @@ static void serial_init(void) {
     outb(0x3FC, 0x0B);
 }
 
-static void serial_write(const char *s) {
+
+static bool serial_write(const char *s) {
     while (*s) {
-        uint8_t ready;
-        do {
+        bool ready = false;
+
+        for (unsigned int i = 0; i < 100000; i++) {
+            uint8_t status;
+
             __asm__ volatile ("inb %1, %0"
-                : "=a"(ready) : "Nd"((uint16_t)0x3FD));
-        } while (!(ready & 0x20));
+                : "=a"(status)
+                : "Nd"((uint16_t)0x3FD));
+
+            if (status & 0x20) {
+                ready = true;
+                break;
+            }
+        }
+
+        if (!ready) {
+            return false;
+        }
+
         outb(0x3F8, (uint8_t)*s++);
     }
+
+    return true;
 }
+
 
 static void pixel(struct limine_framebuffer *fb,
                   uint64_t x, uint64_t y, uint32_t color) {
@@ -111,20 +131,22 @@ static void draw_text(struct limine_framebuffer *fb,
 
 void itsib_main(void) {
     serial_init();
-    serial_write("\r\nItsIB OS: kernel entered successfully!\r\n");
+    if (!serial_write("\r\nItsIB OS: kernel entered successfully!\r\n")) {
+        for (;;) __asm__ volatile ("hlt");
+    }
 
     struct limine_framebuffer_response *response =
         framebuffer_request.response;
 
     if (!response || response->framebuffer_count == 0) {
-        serial_write("ERROR: Limine provided no framebuffer.\r\n");
+        (void)serial_write("ERROR: Limine provided no framebuffer.\r\n");
         for (;;) __asm__ volatile ("hlt");
     }
 
     struct limine_framebuffer *fb = response->framebuffers[0];
 
     if (!fb || !fb->address || fb->bpp != 32) {
-        serial_write("ERROR: unsupported framebuffer format.\r\n");
+        (void)serial_write("ERROR: unsupported framebuffer format.\r\n");
         for (;;) __asm__ volatile ("hlt");
     }
 
@@ -138,7 +160,9 @@ void itsib_main(void) {
     draw_text(fb, 44, 100, "WELCOME", 0xFFFFFF, 3);
     draw_text(fb, 44, 140, "YOUR OWN OPERATING SYSTEM", 0x8CA3B8, 2);
 
-    serial_write("ItsIB OS: framebuffer initialized.\r\n");
+    if (!serial_write("ItsIB OS: framebuffer initialized.\r\n")) {
+        for (;;) __asm__ volatile ("hlt");
+    }
 
     for (;;) __asm__ volatile ("hlt");
 }
