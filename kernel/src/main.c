@@ -187,6 +187,21 @@ void itsib_main(void) {
     serial_write_hex(memmap->entry_count);
     (void)serial_write("\r\n");
 
+    uint64_t usable_ram = 0;
+
+    for (uint64_t i = 0; i < memmap->entry_count; i++) {
+        struct limine_memmap_entry *entry = memmap->entries[i];
+
+        if (entry->type == LIMINE_MEMMAP_USABLE) {
+            usable_ram += entry->length;
+        }
+    }
+
+    (void)serial_write("Total usable RAM (bytes): 0x");
+    serial_write_hex(usable_ram);
+    (void)serial_write("\r\n");
+
+
     for (uint64_t i = 0; i < memmap->entry_count; i++) {
         struct limine_memmap_entry *entry = memmap->entries[i];
 
