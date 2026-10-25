@@ -21,6 +21,13 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
     .response = NULL
 };
 
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_memmap_request memmap_request = {
+    .id = LIMINE_MEMMAP_REQUEST_ID,
+    .revision = 0,
+    .response = NULL
+};
+
 __attribute__((used, section(".limine_requests_end_marker")))
 static volatile uint64_t limine_requests_end_marker[] =
     LIMINE_REQUESTS_END_MARKER;
@@ -66,6 +73,24 @@ static bool serial_write(const char *s) {
 
     return true;
 }
+
+static void serial_write_hex(uint64_t value) {
+    static const char digits[] = "0123456789ABCDEF";
+    char buffer[16];
+
+    for (int i = 15; i >= 0; i--) {
+        buffer[i] = digits[value & 0xF];
+        value >>= 4;
+    }
+
+    for (int i = 0; i < 16; i++) {
+        char character[2] = {buffer[i], '\0'};
+        if (!serial_write(character)) {
+            return;
+        }
+    }
+}
+
 static void kernel_panic(const char *message) {
     (void)serial_write("\r\nKERNEL PANIC: ");
     (void)serial_write(message);
@@ -148,6 +173,35 @@ void itsib_main(void) {
     serial_init();
     gdt_init();
     idt_init();
+
+    struct limine_memmap_response *memmap =
+        memmap_request.response;
+
+    if (!memmap) {
+        (void)serial_write("ERROR: Limine provided no memory map.\r\n");
+        kernel_panic("Memory map unavailable");
+    }
+
+    (void)serial_write("ItsIB OS: memory map received!\r\n");
+    (void)serial_write("Memory map entries: ");
+    serial_write_hex(memmap->entry_count);
+    (void)serial_write("\r\n");
+
+    for (uint64_t i = 0; i < memmap->entry_count; i++) {
+        struct limine_memmap_entry *entry = memmap->entries[i];
+
+        (void)serial_write("Region base: 0x");
+        serial_write_hex(entry->base);
+
+        (void)serial_write(" length: 0x");
+        serial_write_hex(entry->length);
+
+        (void)serial_write(" type: ");
+        serial_write_hex(entry->type);
+
+        (void)serial_write("\r\n");
+    }
+
     if (!serial_write("\r\nItsIB OS: kernel entered successfully!\r\n")) {
         for (;;) __asm__ volatile ("hlt");
     }
