@@ -64,7 +64,15 @@ static bool serial_write(const char *s) {
 
     return true;
 }
+static void kernel_panic(const char *message) {
+    (void)serial_write("\r\nKERNEL PANIC: ");
+    (void)serial_write(message);
+    (void)serial_write("\r\nSystem halted.\r\n");
 
+    for (;;) {
+        __asm__ volatile ("cli; hlt");
+    }
+}
 
 static void pixel(struct limine_framebuffer *fb,
                   uint64_t x, uint64_t y, uint32_t color) {
