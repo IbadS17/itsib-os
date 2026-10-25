@@ -2,6 +2,7 @@
 #include <stddef.h>
 #include <limine.h>
 #include <stdbool.h>
+#include "gdt.h"
 
 
 __attribute__((used, section(".limine_requests_start_marker")))
@@ -144,6 +145,7 @@ static void draw_text(struct limine_framebuffer *fb,
 
 void itsib_main(void) {
     serial_init();
+    gdt_init();
     if (!serial_write("\r\nItsIB OS: kernel entered successfully!\r\n")) {
         for (;;) __asm__ volatile ("hlt");
     }

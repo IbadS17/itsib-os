@@ -6,6 +6,7 @@ ISO_ROOT := iso
 
 CC := gcc
 LD := ld.lld
+NASM := nasm
 CFLAGS := -std=gnu11 -ffreestanding -fno-stack-protector \
           -fno-pic -fno-pie -m64 -mno-red-zone \
           -mcmodel=kernel -mgeneral-regs-only \
@@ -19,9 +20,17 @@ all: iso
 
 build: $(KERNEL)
 
-$(KERNEL): kernel/src/main.c kernel/linker.ld
-	$(CC) -c $< -o kernel/main.o $(CFLAGS)
-	$(LD) $(LDFLAGS) -o $@ kernel/main.o
+$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o
+
+kernel/main.o: kernel/src/main.c
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/gdt.o: kernel/src/gdt.c kernel/src/gdt.h
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/gdt_flush.o: kernel/src/gdt_flush.asm
+	$(NASM) -f elf64 $< -o $@
 
 limine:
 	cd $(LIMINE) && ./configure --enable-uefi-x86-64 --enable-uefi-cd
@@ -49,5 +58,5 @@ check-tools:
 	@command -v qemu-system-x86_64
 
 clean:
-	rm -f kernel/main.o $(KERNEL) $(ISO)
+	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o $(KERNEL) $(ISO)
 	rm -f $(ISO_ROOT)/boot/itsib-kernel.elf
