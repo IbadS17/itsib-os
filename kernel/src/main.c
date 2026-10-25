@@ -73,6 +73,11 @@ static void kernel_panic(const char *message) {
         __asm__ volatile ("cli; hlt");
     }
 }
+static void kernel_assert(bool condition, const char *message) {
+    if (!condition) {
+        kernel_panic(message);
+    }
+}
 
 static void pixel(struct limine_framebuffer *fb,
                   uint64_t x, uint64_t y, uint32_t color) {
