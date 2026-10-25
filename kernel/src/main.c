@@ -3,6 +3,7 @@
 #include <limine.h>
 #include <stdbool.h>
 #include "gdt.h"
+#include "idt.h"
 
 
 __attribute__((used, section(".limine_requests_start_marker")))
@@ -146,6 +147,7 @@ static void draw_text(struct limine_framebuffer *fb,
 void itsib_main(void) {
     serial_init();
     gdt_init();
+    idt_init();
     if (!serial_write("\r\nItsIB OS: kernel entered successfully!\r\n")) {
         for (;;) __asm__ volatile ("hlt");
     }
@@ -171,9 +173,26 @@ void itsib_main(void) {
         for (uint64_t x = 0; x < fb->width; x++)
             pixel(fb, x, y, 0x00B8D4);
 
-    draw_text(fb, 40, 40, "ITSIB OS", 0x00D9FF, 6);
-    draw_text(fb, 44, 100, "WELCOME", 0xFFFFFF, 3);
-    draw_text(fb, 44, 140, "YOUR OWN OPERATING SYSTEM", 0x8CA3B8, 2);
+    const uint64_t title_width = 8 * 6 * 6;
+    const uint64_t welcome_width = 7 * 6 * 3;
+    const uint64_t subtitle_width = 26 * 6 * 2;
+
+    const uint64_t block_width = subtitle_width;
+    const uint64_t block_height = 114;
+
+    const uint64_t start_x = (fb->width - block_width) / 2;
+    const uint64_t start_y = (fb->height - block_height) / 2;
+
+    draw_text(fb, start_x + (block_width - title_width) / 2,
+              start_y, "ITSIB OS", 0x00D9FF, 6);
+
+    draw_text(fb, start_x + (block_width - welcome_width) / 2,
+              start_y + 52, "WELCOME", 0xFFFFFF, 3);
+
+    draw_text(fb, start_x,
+              start_y + 92, "YOUR OWN OPERATING SYSTEM",
+              0x8CA3B8, 2);
+
 
     if (!serial_write("ItsIB OS: framebuffer initialized.\r\n")) {
         for (;;) __asm__ volatile ("hlt");

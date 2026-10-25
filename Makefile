@@ -20,8 +20,8 @@ all: iso
 
 build: $(KERNEL)
 
-$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/linker.ld
-	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o
+$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o
 
 kernel/main.o: kernel/src/main.c
 	$(CC) -c $< -o $@ $(CFLAGS)
@@ -30,6 +30,12 @@ kernel/gdt.o: kernel/src/gdt.c kernel/src/gdt.h
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 kernel/gdt_flush.o: kernel/src/gdt_flush.asm
+	$(NASM) -f elf64 $< -o $@
+
+kernel/idt.o: kernel/src/idt.c kernel/src/idt.h
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/idt_load.o: kernel/src/idt_load.asm
 	$(NASM) -f elf64 $< -o $@
 
 limine:
@@ -58,5 +64,5 @@ check-tools:
 	@command -v qemu-system-x86_64
 
 clean:
-	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o $(KERNEL) $(ISO)
+	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o $(KERNEL) $(ISO)
 	rm -f $(ISO_ROOT)/boot/itsib-kernel.elf
