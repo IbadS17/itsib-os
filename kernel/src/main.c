@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include "gdt.h"
 #include "idt.h"
-
+#include "pmm.h"
 
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile uint64_t limine_requests_start_marker[] =
@@ -24,6 +24,20 @@ static volatile struct limine_framebuffer_request framebuffer_request = {
 __attribute__((used, section(".limine_requests")))
 static volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST_ID,
+    .revision = 0,
+    .response = NULL
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_hhdm_request hhdm_request = {
+    .id = LIMINE_HHDM_REQUEST_ID,
+    .revision = 0,
+    .response = NULL
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_executable_address_request executable_address_request = {
+    .id = LIMINE_EXECUTABLE_ADDRESS_REQUEST_ID,
     .revision = 0,
     .response = NULL
 };
@@ -171,6 +185,33 @@ static void draw_text(struct limine_framebuffer *fb,
 
 void itsib_main(void) {
     serial_init();
+
+    struct limine_hhdm_response *hhdm = hhdm_request.response;
+
+    if (!hhdm) {
+        kernel_panic("HHDM response unavailable");
+    }
+
+    struct limine_executable_address_response *kernel_address =
+        executable_address_request.response;
+
+    if (!kernel_address) {
+        kernel_panic("Kernel address response unavailable");
+    }
+
+    (void)serial_write("Kernel physical base: 0x");
+    serial_write_hex(kernel_address->physical_base);
+    (void)serial_write("\r\n");
+
+    (void)serial_write("Kernel virtual base: 0x");
+    serial_write_hex(kernel_address->virtual_base);
+    (void)serial_write("\r\n");
+
+
+    (void)serial_write("HHDM offset: 0x");
+    serial_write_hex(hhdm->offset);
+    (void)serial_write("\r\n");
+
     gdt_init();
     idt_init();
 
@@ -181,6 +222,98 @@ void itsib_main(void) {
         (void)serial_write("ERROR: Limine provided no memory map.\r\n");
         kernel_panic("Memory map unavailable");
     }
+    pmm_init(memmap, hhdm->offset);
+    uint64_t initial_free_pages = pmm_get_free_pages();
+
+    kernel_assert(initial_free_pages == pmm_get_usable_pages(),
+                  "PMM test: initial free-page count is incorrect");
+    (void)serial_write("PMM: Running allocator tests...\r\n");
+
+    uint64_t page_a = pmm_alloc_page();
+    uint64_t page_b = pmm_alloc_page();
+
+    kernel_assert(page_a != 0, "PMM test: allocation A failed");
+    kernel_assert(page_b != 0, "PMM test: allocation B failed");
+
+    kernel_assert(page_a % PAGE_SIZE == 0,
+                  "PMM test: page A is not aligned");
+    kernel_assert(page_b % PAGE_SIZE == 0,
+                  "PMM test: page B is not aligned");
+
+    kernel_assert(page_a != page_b,
+                  "PMM test: duplicate physical page allocated");
+
+    kernel_assert(pmm_free_page(page_a),
+                  "PMM test: freeing page A failed");
+
+    kernel_assert(!pmm_free_page(page_a),
+                  "PMM test: double-free was accepted");
+
+    uint64_t page_c = pmm_alloc_page();
+
+    kernel_assert(page_c != 0,
+                "PMM test: allocation after freeing failed");
+
+    kernel_assert(page_c != page_b,
+                "PMM test: allocated page B twice");
+
+    kernel_assert(pmm_free_page(page_c),
+                "PMM test: freeing page C failed");
+
+    uint64_t page_d = pmm_alloc_page();
+
+    kernel_assert(page_d != 0,
+                "PMM test: reallocation after freeing C failed");
+
+    kernel_assert(pmm_free_page(page_d),
+                "PMM test: freeing page D failed");
+
+    kernel_assert(pmm_free_page(page_b),
+                "PMM test: freeing page B failed");
+
+    kernel_assert(!pmm_free_page(0),
+                "PMM test: zero address was freed");
+
+    kernel_assert(!pmm_free_page(1),
+                "PMM test: unaligned address was freed");
+
+    kernel_assert(!pmm_free_page(0x800000),
+                "PMM test: reserved address was freed");
+
+    (void)serial_write("PMM: Allocation/free tests passed!\r\n");
+    (void)serial_write("PMM: Invalid-free tests passed!\r\n");
+    kernel_assert(pmm_get_free_pages() == initial_free_pages,
+                "PMM test: free-page count did not recover");
+
+    kernel_assert(pmm_get_free_pages() <= pmm_get_usable_pages(),
+                "PMM test: free-page count exceeds usable pages");
+
+    (void)serial_write("PMM: Free-page accounting tests passed!\r\n");
+    uint64_t hhdm_test_page = pmm_alloc_page();
+
+    kernel_assert(hhdm_test_page != 0,
+                  "HHDM test: page allocation failed");
+
+    volatile uint64_t *test_address =
+        (volatile uint64_t *)(hhdm->offset + hhdm_test_page);
+
+    *test_address = 0x49545349424F5355ULL;
+
+    kernel_assert(*test_address == 0x49545349424F5355ULL,
+                  "HHDM test: memory read/write failed");
+
+    kernel_assert(pmm_free_page(hhdm_test_page),
+                  "HHDM test: freeing page failed");
+
+    (void)serial_write("PMM: HHDM page read/write test passed!\r\n");
+
+    (void)serial_write("PMM: Usable 4 KiB pages: ");
+    serial_write_hex(pmm_get_usable_pages());
+    (void)serial_write("\r\n");
+
+    (void)serial_write("PMM: Bitmap storage required (bytes): ");
+    serial_write_hex(pmm_get_bitmap_bytes());
+    (void)serial_write("\r\n");
 
     (void)serial_write("ItsIB OS: memory map received!\r\n");
     (void)serial_write("Memory map entries: ");
