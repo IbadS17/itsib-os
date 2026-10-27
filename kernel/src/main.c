@@ -5,6 +5,7 @@
 #include "gdt.h"
 #include "idt.h"
 #include "pmm.h"
+#include "kheap.h"
 
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile uint64_t limine_requests_start_marker[] =
@@ -306,6 +307,56 @@ void itsib_main(void) {
                   "HHDM test: freeing page failed");
 
     (void)serial_write("PMM: HHDM page read/write test passed!\r\n");
+    (void)serial_write("KHEAP: Initializing kernel heap...\r\n");
+
+    kernel_assert(kheap_init(hhdm->offset),
+                  "KHEAP test: initialization failed");
+
+    void *heap_a = kmalloc(24);
+    void *heap_b = kmalloc(128);
+
+    kernel_assert(heap_a != NULL,
+                  "KHEAP test: allocation A failed");
+
+    kernel_assert(heap_b != NULL,
+                  "KHEAP test: allocation B failed");
+
+    kernel_assert(((uintptr_t)heap_a % 16) == 0,
+                  "KHEAP test: allocation A is not aligned");
+
+    kernel_assert(((uintptr_t)heap_b % 16) == 0,
+                  "KHEAP test: allocation B is not aligned");
+
+    *(uint64_t *)heap_a = 0x4954534942414144ULL;
+    *(uint64_t *)heap_b = 0x4B45524E454C4845ULL;
+
+    kernel_assert(*(uint64_t *)heap_a == 0x4954534942414144ULL,
+                  "KHEAP test: allocation A read/write failed");
+
+    kernel_assert(*(uint64_t *)heap_b == 0x4B45524E454C4845ULL,
+                  "KHEAP test: allocation B read/write failed");
+
+    kernel_assert(kfree(heap_a),
+                  "KHEAP test: freeing allocation A failed");
+
+    kernel_assert(!kfree(heap_a),
+                  "KHEAP test: double-free was accepted");
+
+    kernel_assert(kfree(heap_b),
+                  "KHEAP test: freeing allocation B failed");
+
+    kernel_assert(!kfree((void *)(uintptr_t)0x1234),
+                  "KHEAP test: invalid pointer was accepted");
+
+    kernel_assert(kmalloc(0) == NULL,
+                  "KHEAP test: zero-size allocation was accepted");
+
+    kernel_assert(kmalloc(PAGE_SIZE) == NULL,
+                  "KHEAP test: oversized allocation was accepted");
+
+    (void)serial_write("KHEAP: Initialization test passed!\r\n");
+    (void)serial_write("KHEAP: Allocation and alignment tests passed!\r\n");
+    (void)serial_write("KHEAP: Free and invalid-pointer tests passed!\r\n");
 
     (void)serial_write("PMM: Usable 4 KiB pages: ");
     serial_write_hex(pmm_get_usable_pages());

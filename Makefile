@@ -20,8 +20,8 @@ all: iso
 
 build: $(KERNEL)
 
-$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/linker.ld
-	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o
+$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o
 
 kernel/main.o: kernel/src/main.c
 	$(CC) -c $< -o $@ $(CFLAGS)
@@ -39,6 +39,9 @@ kernel/idt_load.o: kernel/src/idt_load.asm
 	$(NASM) -f elf64 $< -o $@
 
 kernel/pmm.o: kernel/src/pmm.c kernel/src/pmm.h
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/kheap.o: kernel/src/kheap.c kernel/src/kheap.h kernel/src/pmm.h
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 limine:
@@ -67,5 +70,5 @@ check-tools:
 	@command -v qemu-system-x86_64
 
 clean:
-	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o $(KERNEL) $(ISO)
+	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o $(KERNEL) $(ISO)
 	rm -f $(ISO_ROOT)/boot/itsib-kernel.elf
