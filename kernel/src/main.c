@@ -6,6 +6,7 @@
 #include "idt.h"
 #include "pmm.h"
 #include "kheap.h"
+#include "vmm.h"
 
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile uint64_t limine_requests_start_marker[] =
@@ -34,6 +35,16 @@ static volatile struct limine_hhdm_request hhdm_request = {
     .id = LIMINE_HHDM_REQUEST_ID,
     .revision = 0,
     .response = NULL
+};
+
+__attribute__((used, section(".limine_requests")))
+static volatile struct limine_paging_mode_request paging_mode_request = {
+    .id = LIMINE_PAGING_MODE_REQUEST_ID,
+    .revision = 0,
+    .response = NULL,
+    .mode = LIMINE_PAGING_MODE_X86_64_4LVL,
+    .max_mode = LIMINE_PAGING_MODE_X86_64_4LVL,
+    .min_mode = LIMINE_PAGING_MODE_X86_64_4LVL
 };
 
 __attribute__((used, section(".limine_requests")))
@@ -197,6 +208,19 @@ static void draw_text(struct limine_framebuffer *fb,
 
 void itsib_main(void) {
     serial_init();
+
+    struct limine_paging_mode_response *paging_mode =
+        paging_mode_request.response;
+
+    if (!paging_mode) {
+        kernel_panic("Paging mode response unavailable");
+    }
+
+    if (paging_mode->mode != LIMINE_PAGING_MODE_X86_64_4LVL) {
+        kernel_panic("Expected x86-64 4-level paging");
+    }
+
+    (void)serial_write("VMM: 4-level paging confirmed!\r\n");
     uint64_t cr3_value = read_cr3();
 
     (void)serial_write("Current CR3: 0x");
@@ -208,6 +232,18 @@ void itsib_main(void) {
     if (!hhdm) {
         kernel_panic("HHDM response unavailable");
     }
+
+    uint64_t pml4_physical = cr3_value & ~0xFFFULL;
+    volatile uint64_t *pml4 =
+        (volatile uint64_t *)(hhdm->offset + pml4_physical);
+
+    (void)serial_write("VMM: PML4 physical address: 0x");
+    serial_write_hex(pml4_physical);
+    (void)serial_write("\r\n");
+
+    (void)serial_write("VMM: PML4 entry 0: 0x");
+    serial_write_hex(pml4[0]);
+    (void)serial_write("\r\n");
 
     struct limine_executable_address_response *kernel_address =
         executable_address_request.response;
@@ -227,6 +263,23 @@ void itsib_main(void) {
 
     (void)serial_write("HHDM offset: 0x");
     serial_write_hex(hhdm->offset);
+    (void)serial_write("\r\n");
+
+    if (!vmm_init(hhdm->offset, pml4_physical)) {
+        kernel_panic("VMM initialization failed");
+    }
+
+    (void)serial_write("VMM: Initialization successful!\r\n");
+
+    uint64_t kernel_page_entry = 0;
+
+    if (!vmm_get_pte(kernel_address->virtual_base,
+                     &kernel_page_entry)) {
+        kernel_panic("VMM kernel mapping lookup failed");
+    }
+
+    (void)serial_write("VMM: Kernel mapping verified! Entry: 0x");
+    serial_write_hex(kernel_page_entry);
     (void)serial_write("\r\n");
 
     gdt_init();
