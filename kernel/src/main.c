@@ -357,6 +357,112 @@ void itsib_main(void) {
     (void)serial_write("KHEAP: Initialization test passed!\r\n");
     (void)serial_write("KHEAP: Allocation and alignment tests passed!\r\n");
     (void)serial_write("KHEAP: Free and invalid-pointer tests passed!\r\n");
+        (void)serial_write("KHEAP: Testing block coalescing...\r\n");
+
+    void *coal_a = kmalloc(256);
+    void *coal_b = kmalloc(256);
+    void *coal_c = kmalloc(256);
+
+    kernel_assert(coal_a != NULL && coal_b != NULL && coal_c != NULL,
+                  "KHEAP test: coalescing allocations failed");
+
+    kernel_assert((uintptr_t)coal_b > (uintptr_t)coal_a &&
+                  (uintptr_t)coal_c > (uintptr_t)coal_b,
+                  "KHEAP test: allocations are not in expected order");
+
+    kernel_assert(kfree(coal_a),
+                  "KHEAP test: freeing coalescing block A failed");
+
+    kernel_assert(kfree(coal_b),
+                  "KHEAP test: freeing coalescing block B failed");
+
+    void *coal_large = kmalloc(400);
+
+    kernel_assert(coal_large == coal_a,
+                  "KHEAP test: adjacent free blocks did not coalesce");
+
+    kernel_assert(kfree(coal_large),
+                  "KHEAP test: freeing merged allocation failed");
+
+    kernel_assert(kfree(coal_c),
+                  "KHEAP test: freeing coalescing block C failed");
+
+    (void)serial_write("KHEAP: Block coalescing test passed!\r\n");
+    (void)serial_write("KHEAP: Testing freed memory reuse...\r\n");
+
+    void *reuse_a = kmalloc(64);
+
+    kernel_assert(reuse_a != NULL,
+                  "KHEAP test: reuse allocation A failed");
+
+    kernel_assert(kfree(reuse_a),
+                  "KHEAP test: freeing reuse allocation A failed");
+
+    void *reuse_b = kmalloc(64);
+
+    kernel_assert(reuse_b == reuse_a,
+                  "KHEAP test: freed memory was not reused");
+
+    kernel_assert(kfree(reuse_b),
+                  "KHEAP test: freeing reused allocation failed");
+
+    (void)serial_write("KHEAP: Freed memory reuse test passed!\r\n");
+
+    (void)serial_write("KHEAP: Testing fragmentation...\r\n");
+
+    void *frag_a = kmalloc(256);
+    void *frag_b = kmalloc(256);
+    void *frag_c = kmalloc(256);
+
+    kernel_assert(frag_a != NULL && frag_b != NULL && frag_c != NULL,
+                  "KHEAP test: fragmentation allocations failed");
+
+    kernel_assert(kfree(frag_a),
+                  "KHEAP test: freeing fragment A failed");
+
+    kernel_assert(kfree(frag_c),
+                  "KHEAP test: freeing fragment C failed");
+
+    void *frag_large = kmalloc(512);
+
+    kernel_assert(frag_large != NULL,
+                  "KHEAP test: allocation after fragmentation failed");
+
+    kernel_assert(frag_large != frag_a,
+                  "KHEAP test: separate free regions were merged incorrectly");
+
+    kernel_assert(kfree(frag_large),
+                  "KHEAP test: freeing fragmented allocation failed");
+
+    kernel_assert(kfree(frag_b),
+                  "KHEAP test: freeing fragment B failed");
+
+    (void)serial_write("KHEAP: Fragmentation test passed!\r\n");
+    (void)serial_write("KHEAP: Testing heap growth...\r\n");
+
+    void *growth_a = kmalloc(3000);
+    void *growth_b = kmalloc(3000);
+
+    kernel_assert(growth_a != NULL,
+                  "KHEAP test: first growth allocation failed");
+
+    kernel_assert(growth_b != NULL,
+                  "KHEAP test: second growth allocation failed");
+
+    kernel_assert(growth_a != growth_b,
+                  "KHEAP test: growth allocations overlap");
+
+    kernel_assert(((uintptr_t)growth_a % 16) == 0 &&
+                  ((uintptr_t)growth_b % 16) == 0,
+                  "KHEAP test: growth allocation is not aligned");
+
+    kernel_assert(kfree(growth_a),
+                  "KHEAP test: freeing growth allocation A failed");
+
+    kernel_assert(kfree(growth_b),
+                  "KHEAP test: freeing growth allocation B failed");
+
+    (void)serial_write("KHEAP: Heap growth test passed!\r\n");
 
     (void)serial_write("PMM: Usable 4 KiB pages: ");
     serial_write_hex(pmm_get_usable_pages());
