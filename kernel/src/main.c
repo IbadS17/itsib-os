@@ -47,6 +47,17 @@ __attribute__((used, section(".limine_requests_end_marker")))
 static volatile uint64_t limine_requests_end_marker[] =
     LIMINE_REQUESTS_END_MARKER;
 
+static inline uint64_t read_cr3(void) {
+    uint64_t value;
+
+    __asm__ volatile (
+        "mov %%cr3, %0"
+        : "=r"(value)
+    );
+
+    return value;
+}
+
 static inline void outb(uint16_t port, uint8_t value) {
     __asm__ volatile ("outb %0, %1" : : "a"(value), "Nd"(port));
 }
@@ -186,6 +197,11 @@ static void draw_text(struct limine_framebuffer *fb,
 
 void itsib_main(void) {
     serial_init();
+    uint64_t cr3_value = read_cr3();
+
+    (void)serial_write("Current CR3: 0x");
+    serial_write_hex(cr3_value);
+    (void)serial_write("\r\n");
 
     struct limine_hhdm_response *hhdm = hhdm_request.response;
 
