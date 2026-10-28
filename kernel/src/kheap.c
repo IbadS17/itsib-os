@@ -70,15 +70,15 @@ void *kmalloc(size_t size) {
         return NULL;
     }
 
-    if (size > PAGE_SIZE - sizeof(struct heap_block)) {
-        return NULL;
-    }
-
     if (size > SIZE_MAX - (HEAP_ALIGNMENT - 1)) {
         return NULL;
     }
 
     size = align_up(size);
+
+    if (size > PAGE_SIZE - sizeof(struct heap_block)) {
+        return NULL;
+    }
 
     for (;;) {
         struct heap_block *block = heap_head;
