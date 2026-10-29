@@ -9,6 +9,7 @@
 #include "vmm.h"
 #include "timer.h"
 #include "keyboard.h"
+#include "shell.h"
 
 extern void timer_irq_stub(void);
 extern void keyboard_irq_stub(void);
@@ -371,6 +372,61 @@ static void console_putc(struct limine_framebuffer *fb, char ch)
 
     if (console_x + CONSOLE_CHAR_W >= console_max_x)
         console_newline(fb);
+}
+
+
+static struct limine_framebuffer *console_fb;
+
+static void console_clear_input_line(
+    uint64_t start_x,
+    uint64_t start_y,
+    size_t cells
+)
+{
+    if (!console_fb)
+        return;
+
+    for (size_t i = 0; i < cells; i++) {
+        uint64_t x = start_x + i * CONSOLE_CHAR_W;
+
+        for (uint64_t y = start_y;
+             y < start_y + CONSOLE_CHAR_H && y < console_max_y;
+             y++) {
+            for (uint64_t px = x;
+                 px < x + CONSOLE_CHAR_W && px < console_max_x;
+                 px++) {
+                pixel(console_fb, px, y, CONSOLE_BG);
+            }
+        }
+    }
+}
+
+static void shell_write_char(char ch)
+{
+    console_putc(console_fb, ch);
+}
+
+static void shell_clear_console(void)
+{
+    for (uint64_t y = console_start_y; y < console_max_y; y++) {
+        for (uint64_t x = console_start_x; x < console_max_x; x++) {
+            pixel(console_fb, x, y, CONSOLE_BG);
+        }
+    }
+
+    console_x = console_start_x;
+    console_y = console_start_y;
+}
+
+static void shell_print_prompt(void)
+{
+    shell_write_char('i');
+    shell_write_char('t');
+    shell_write_char('s');
+    shell_write_char('i');
+    shell_write_char('b');
+    shell_write_char('>');
+    shell_write_char(' ');
 }
 
 void itsib_main(void) {
@@ -878,19 +934,122 @@ void itsib_main(void) {
 
     (void)serial_write("KEYBOARD: Framebuffer console ready.\r\n");
 
+    console_fb = fb;
+
+    #define COMMAND_SIZE 128
+    #define HISTORY_SIZE 8
+
+    char command[COMMAND_SIZE] = {0};
+    char history[HISTORY_SIZE][COMMAND_SIZE] = {{0}};
+    size_t command_length = 0;
+    size_t history_count = 0;
+    size_t history_next = 0;
+    size_t history_position = 0;
+    uint64_t input_start_x = 0;
+    uint64_t input_start_y = 0;
+
+    shell_print_prompt();
+    input_start_x = console_x;
+    input_start_y = console_y;
+
     for (;;) {
-        char key;
+        keyboard_event_t event;
 
-        if (keyboard_getchar(&key)) {
-            console_putc(fb, key);
+        if (keyboard_get_event(&event)) {
+            if (event.type == KEYBOARD_EVENT_UP ||
+                event.type == KEYBOARD_EVENT_DOWN) {
+                if (history_count > 0) {
+                    if (event.type == KEYBOARD_EVENT_UP) {
+                        if (history_position > 0)
+                            history_position--;
+                    } else if (history_position < history_count) {
+                        history_position++;
+                    }
 
-            if (key == '\n') {
-                (void)serial_write("\r\n");
-            } else if (key == '\b') {
-                (void)serial_write("\b \b");
-            } else {
-                char output[2] = { key, '\0' };
-                (void)serial_write(output);
+                    size_t old_length = command_length;
+
+                    /* Erase the old input pixels, preserving the prompt. */
+                    console_clear_input_line(
+                        input_start_x, input_start_y, old_length
+                    );
+
+                    console_x = input_start_x;
+                    console_y = input_start_y;
+
+                    if (history_position == history_count) {
+                        command_length = 0;
+                        command[0] = '\0';
+                    } else {
+                        size_t oldest =
+                            (history_next + HISTORY_SIZE - history_count)
+                            % HISTORY_SIZE;
+                        size_t slot =
+                            (oldest + history_position) % HISTORY_SIZE;
+                        size_t i = 0;
+
+                        while (i < COMMAND_SIZE - 1 &&
+                               history[slot][i] != '\0') {
+                            command[i] = history[slot][i];
+                            i++;
+                        }
+
+                        command[i] = '\0';
+                        command_length = i;
+                    }
+
+                    for (size_t i = 0; i < command_length; i++)
+                        console_putc(console_fb, command[i]);
+                }
+            } else if (event.type == KEYBOARD_EVENT_CHAR) {
+                char key = event.character;
+
+                if (key == '\r' || key == '\n') {
+                    shell_write_char('\n');
+                    (void)serial_write("\r\n");
+
+                    command[command_length] = '\0';
+
+                    if (command_length > 0) {
+                        size_t slot = history_next;
+
+                        size_t i = 0;
+                        while (i < COMMAND_SIZE - 1 &&
+                               command[i] != '\0') {
+                            history[slot][i] = command[i];
+                            i++;
+                        }
+                        history[slot][i] = '\0';
+
+                        history_next = (history_next + 1) % HISTORY_SIZE;
+                        if (history_count < HISTORY_SIZE)
+                            history_count++;
+                    }
+
+                    shell_execute(command, shell_write_char,
+                                  shell_clear_console);
+
+                    command_length = 0;
+                    command[0] = '\0';
+                    shell_print_prompt();
+                    input_start_x = console_x;
+                    input_start_y = console_y;
+                    history_position = history_count;
+                } else if (key == '\b') {
+                    if (command_length > 0) {
+                        command_length--;
+                        command[command_length] = '\0';
+                        shell_write_char('\b');
+                        (void)serial_write("\b \b");
+                    }
+                } else if (key >= 32 && key <= 126 &&
+                           command_length < COMMAND_SIZE - 1) {
+                    command[command_length++] = key;
+                    command[command_length] = '\0';
+                    shell_write_char(key);
+
+                    char output[2] = { key, '\0' };
+                    (void)serial_write(output);
+                }
             }
         } else {
             __asm__ volatile ("sti; hlt" ::: "memory");

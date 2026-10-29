@@ -8,13 +8,14 @@
 #define KBD_STATUS_PORT 0x64
 #define KEY_BUFFER_SIZE 128
 
-static volatile char key_buffer[KEY_BUFFER_SIZE];
+static volatile keyboard_event_t key_buffer[KEY_BUFFER_SIZE];
 static volatile uint32_t key_head = 0;
 static volatile uint32_t key_tail = 0;
 
 static volatile bool shift_pressed = false;
 static volatile bool caps_lock = false;
 static volatile bool num_lock = true;
+static volatile bool extended_scancode = false;
 
 static inline uint8_t inb(uint16_t port)
 {
@@ -39,7 +40,7 @@ static const char normal_table[128] = {
     [0x23]='h',[0x24]='j',[0x25]='k',[0x26]='l',
     [0x27]=';',[0x28]='\'',[0x29]='`',[0x2B]='\\',
     [0x2C]='z',[0x2D]='x',[0x2E]='c',[0x2F]='v',[0x30]='b',
-    [0x31]='n',[0x32]='m',[0x33]=',[',[0x34]='.',[0x35]='/',
+    [0x31]='n',[0x32]='m',[0x33]=',',[0x34]='.',[0x35]='/',
     [0x39]=' '
 };
 
@@ -58,13 +59,13 @@ static const char shifted_table[128] = {
     [0x39]=' '
 };
 
-static void push_key(char ch)
+static void push_event(keyboard_event_type_t type, char ch)
 {
-    if (!ch) return;
-
     uint32_t next = (key_head + 1) % KEY_BUFFER_SIZE;
+
     if (next != key_tail) {
-        key_buffer[key_head] = ch;
+        key_buffer[key_head].type = type;
+        key_buffer[key_head].character = ch;
         key_head = next;
     }
 }
@@ -75,51 +76,67 @@ void keyboard_irq_handler(void)
 
     if (status & 0x01) {
         uint8_t sc = inb(KBD_DATA_PORT);
-        bool released = (sc & 0x80) != 0;
-        uint8_t code = sc & 0x7F;
 
-        if (code == 0x2A || code == 0x36) {
-            shift_pressed = !released;
-        } else if (code == 0x3A && !released) {
-            caps_lock = !caps_lock;
-        } else if (code == 0x45 && !released) {
-            num_lock = !num_lock;
-        } else if (!released && code < 128) {
-            char ch = 0;
+        if (sc == 0xE0) {
+            extended_scancode = true;
+        } else {
+            bool extended = extended_scancode;
+            extended_scancode = false;
 
-            if (code >= 0x47 && code <= 0x53) {
-                if (num_lock) {
-                    switch (code) {
-                        case 0x47: ch = '7'; break;
-                        case 0x48: ch = '8'; break;
-                        case 0x49: ch = '9'; break;
-                        case 0x4B: ch = '4'; break;
-                        case 0x4C: ch = '5'; break;
-                        case 0x4D: ch = '6'; break;
-                        case 0x4F: ch = '1'; break;
-                        case 0x50: ch = '2'; break;
-                        case 0x51: ch = '3'; break;
-                        case 0x52: ch = '0'; break;
-                        case 0x53: ch = '.'; break;
+            bool released = (sc & 0x80) != 0;
+            uint8_t code = sc & 0x7F;
+
+            if (extended) {
+                if (!released && code == 0x48)
+                    push_event(KEYBOARD_EVENT_UP, 0);
+                else if (!released && code == 0x50)
+                    push_event(KEYBOARD_EVENT_DOWN, 0);
+            } else if (code == 0x2A || code == 0x36) {
+                shift_pressed = !released;
+            } else if (code == 0x3A && !released) {
+                caps_lock = !caps_lock;
+            } else if (code == 0x45 && !released) {
+                num_lock = !num_lock;
+            } else if (!released && code < 128) {
+                char ch = 0;
+
+                if (code >= 0x47 && code <= 0x53) {
+                    if (num_lock) {
+                        switch (code) {
+                            case 0x47: ch = '7'; break;
+                            case 0x48: ch = '8'; break;
+                            case 0x49: ch = '9'; break;
+                            case 0x4B: ch = '4'; break;
+                            case 0x4C: ch = '5'; break;
+                            case 0x4D: ch = '6'; break;
+                            case 0x4F: ch = '1'; break;
+                            case 0x50: ch = '2'; break;
+                            case 0x51: ch = '3'; break;
+                            case 0x52: ch = '0'; break;
+                            case 0x53: ch = '.'; break;
+                        }
                     }
+                } else {
+                    bool upper = shift_pressed ^ caps_lock;
+                    ch = upper ? shifted_table[code] : normal_table[code];
                 }
-            } else {
-                bool upper = shift_pressed ^ caps_lock;
-                ch = upper ? shifted_table[code] : normal_table[code];
-            }
 
-            push_key(ch);
+                if (ch)
+                    push_event(KEYBOARD_EVENT_CHAR, ch);
+            }
         }
     }
 
     outb(PIC1_COMMAND, PIC_EOI);
 }
 
-bool keyboard_getchar(char *out)
+bool keyboard_get_event(keyboard_event_t *out)
 {
-    if (!out || key_tail == key_head) return false;
+    if (!out || key_tail == key_head)
+        return false;
 
-    *out = key_buffer[key_tail];
+    out->type = key_buffer[key_tail].type;
+    out->character = key_buffer[key_tail].character;
     key_tail = (key_tail + 1) % KEY_BUFFER_SIZE;
     return true;
 }
