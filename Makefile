@@ -20,8 +20,8 @@ all: iso
 
 build: $(KERNEL)
 
-$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/linker.ld
-	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o
+$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o
 
 kernel/main.o: kernel/src/main.c
 	$(CC) -c $< -o $@ $(CFLAGS)
@@ -37,6 +37,19 @@ kernel/idt.o: kernel/src/idt.c kernel/src/idt.h
 
 kernel/idt_load.o: kernel/src/idt_load.asm
 	$(NASM) -f elf64 $< -o $@
+
+kernel/timer.o: kernel/src/timer.c kernel/src/timer.h kernel/src/idt.h
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/timer_irq.o: kernel/src/timer_irq.asm
+	$(NASM) -f elf64 $< -o $@
+
+kernel/keyboard.o: kernel/src/keyboard.c kernel/src/keyboard.h
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/keyboard_irq.o: kernel/src/keyboard_irq.asm
+	$(NASM) -f elf64 $< -o $@
+
 
 kernel/pmm.o: kernel/src/pmm.c kernel/src/pmm.h
 	$(CC) -c $< -o $@ $(CFLAGS)
@@ -73,5 +86,5 @@ check-tools:
 	@command -v qemu-system-x86_64
 
 clean:
-	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o $(KERNEL) $(ISO)
+	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o $(KERNEL) $(ISO)
 	rm -f $(ISO_ROOT)/boot/itsib-kernel.elf

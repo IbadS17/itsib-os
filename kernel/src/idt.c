@@ -1,4 +1,3 @@
-
 #include "idt.h"
 
 struct idt_entry {
@@ -23,7 +22,6 @@ static struct idt_pointer idt_ptr = {
     .base = (uint64_t)idt
 };
 
-
 extern void idt_default_handler(void);
 extern void idt_load(const struct idt_pointer *pointer);
 
@@ -37,6 +35,14 @@ static void idt_set_entry(uint8_t vector, uint64_t handler) {
     idt[vector].reserved = 0;
 }
 
+void idt_register_handler(uint8_t vector, void (*handler)(void)) {
+    if (handler == 0) {
+        return;
+    }
+
+    idt_set_entry(vector, (uint64_t)handler);
+}
+
 void idt_init(void) {
     for (uint16_t i = 0; i < 256; i++) {
         idt_set_entry(i, (uint64_t)idt_default_handler);
@@ -44,4 +50,3 @@ void idt_init(void) {
 
     idt_load(&idt_ptr);
 }
-

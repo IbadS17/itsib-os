@@ -7,6 +7,11 @@
 #include "pmm.h"
 #include "kheap.h"
 #include "vmm.h"
+#include "timer.h"
+#include "keyboard.h"
+
+extern void timer_irq_stub(void);
+extern void keyboard_irq_stub(void);
 
 __attribute__((used, section(".limine_requests_start_marker")))
 static volatile uint64_t limine_requests_start_marker[] =
@@ -182,28 +187,190 @@ static const uint8_t font[26][7] = {
     {17,17,10,4,4,4,4},{31,1,2,4,8,16,31}
 };
 
+
+static const uint8_t digit_font[10][7] = {
+    {14,17,19,21,25,17,14}, // 0
+    {4,12,4,4,4,4,14},      // 1
+    {14,17,1,2,4,8,31},     // 2
+    {30,1,1,14,1,1,30},     // 3
+    {2,6,10,18,31,2,2},     // 4
+    {31,16,16,30,1,1,30},   // 5
+    {14,16,16,30,17,17,14}, // 6
+    {31,1,2,4,8,8,8},       // 7
+    {14,17,17,14,17,17,14}, // 8
+    {14,17,17,15,1,1,14}    // 9
+};
+
+static const uint8_t symbol_font[15][7] = {
+    {0,0,0,0,0,4,4},        // .
+    {0,0,0,0,0,4,8},        // ,
+    {0,4,4,4,0,4,4},        // :
+    {0,4,4,4,0,4,0},        // ;
+    {0,0,0,31,0,0,0},       // -
+    {0,0,14,0,14,0,0},      // =
+    {2,4,8,8,8,4,2},        // <
+    {8,4,2,2,2,4,8},        // >
+    {14,17,2,4,4,0,4},      // ?
+    {14,17,1,2,4,0,4},      // !
+    {4,14,21,4,4,4,4},      // +
+    {0,0,0,31,0,0,0},       // _
+    {12,18,20,8,5,19,0},    // %
+    {12,18,4,8,18,6,0},     // /
+    {12,18,20,8,5,19,0}     // *
+};
+
 static void draw_text(struct limine_framebuffer *fb,
                       uint64_t x, uint64_t y,
-                      const char *s, uint32_t color, unsigned scale) {
+                      const char *s, uint32_t color, unsigned scale)
+{
     while (*s) {
-        char c = *s++;
-        if (c >= 'a' && c <= 'z') c -= 32;
+        unsigned char c = (unsigned char)*s++;
+        const uint8_t *glyph = NULL;
+
+        if (c >= 'a' && c <= 'z')
+            c -= 'a' - 'A';
 
         if (c >= 'A' && c <= 'Z') {
-            const uint8_t *glyph = font[c - 'A'];
-            for (unsigned row = 0; row < 7; row++)
-                for (unsigned col = 0; col < 5; col++)
-                    if (glyph[row] & (1u << (4 - col)))
-                        for (unsigned dy = 0; dy < scale; dy++)
-                            for (unsigned dx = 0; dx < scale; dx++)
-                                pixel(fb, x + col * scale + dx,
-                                      y + row * scale + dy, color);
-        } else if (c == ' ') {
-            /* Blank space */
+            glyph = font[c - 'A'];
+        } else if (c >= '0' && c <= '9') {
+            glyph = digit_font[c - '0'];
+        } else {
+            switch (c) {
+                case '.': glyph = symbol_font[0]; break;
+                case ',': glyph = symbol_font[1]; break;
+                case ':': glyph = symbol_font[2]; break;
+                case ';': glyph = symbol_font[3]; break;
+                case '-': glyph = symbol_font[4]; break;
+                case '=': glyph = symbol_font[5]; break;
+                case '<': glyph = symbol_font[6]; break;
+                case '>': glyph = symbol_font[7]; break;
+                case '?': glyph = symbol_font[8]; break;
+                case '!': glyph = symbol_font[9]; break;
+                case '+': glyph = symbol_font[10]; break;
+                case '_': glyph = symbol_font[11]; break;
+                case '%': glyph = symbol_font[12]; break;
+                case '/': glyph = symbol_font[13]; break;
+                case '*': glyph = symbol_font[14]; break;
+                default: break;
+            }
+        }
+
+        if (glyph) {
+            for (unsigned row = 0; row < 7; row++) {
+                for (unsigned col = 0; col < 5; col++) {
+                    if (glyph[row] & (1u << (4 - col))) {
+                        for (unsigned dy = 0; dy < scale; dy++) {
+                            for (unsigned dx = 0; dx < scale; dx++) {
+                                pixel(fb,
+                                      x + col * scale + dx,
+                                      y + row * scale + dy,
+                                      color);
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         x += 6 * scale;
     }
+}
+
+
+#define CONSOLE_BG       0x101827
+#define CONSOLE_FG       0xFFFFFF
+#define CONSOLE_SCALE    2
+#define CONSOLE_CHAR_W   (6 * CONSOLE_SCALE)
+#define CONSOLE_CHAR_H   (8 * CONSOLE_SCALE)
+
+static uint64_t console_x;
+static uint64_t console_y;
+static uint64_t console_start_x;
+static uint64_t console_start_y;
+static uint64_t console_max_x;
+static uint64_t console_max_y;
+
+static void console_draw_char(struct limine_framebuffer *fb, char ch)
+{
+    char text[2] = { ch, '\0' };
+    draw_text(fb, console_x, console_y, text, CONSOLE_FG, CONSOLE_SCALE);
+}
+
+static void console_clear_cell(struct limine_framebuffer *fb)
+{
+    for (uint64_t y = 0; y < CONSOLE_CHAR_H; y++)
+        for (uint64_t x = 0; x < CONSOLE_CHAR_W; x++)
+            pixel(fb, console_x + x, console_y + y, CONSOLE_BG);
+}
+
+static void console_scroll(struct limine_framebuffer *fb)
+{
+    uint64_t row_height = CONSOLE_CHAR_H;
+    uint64_t area_height = console_max_y - console_start_y;
+
+    if (area_height <= row_height)
+        return;
+
+    for (uint64_t y = console_start_y;
+         y + row_height < console_max_y; y++) {
+        for (uint64_t x = console_start_x;
+             x < console_max_x; x++) {
+            uint32_t *dst = (uint32_t *)(
+                (uint8_t *)fb->address +
+                y * fb->pitch + x * (fb->bpp / 8));
+
+            uint32_t *src = (uint32_t *)(
+                (uint8_t *)fb->address +
+                (y + row_height) * fb->pitch +
+                x * (fb->bpp / 8));
+
+            *dst = *src;
+        }
+    }
+
+    for (uint64_t y = console_max_y - row_height;
+         y < console_max_y; y++) {
+        for (uint64_t x = console_start_x;
+             x < console_max_x; x++) {
+            pixel(fb, x, y, CONSOLE_BG);
+        }
+    }
+}
+
+static void console_newline(struct limine_framebuffer *fb)
+{
+    console_x = console_start_x;
+    console_y += CONSOLE_CHAR_H;
+
+    if (console_y + CONSOLE_CHAR_H >= console_max_y) {
+        console_scroll(fb);
+        console_y = console_max_y - CONSOLE_CHAR_H;
+    }
+}
+
+static void console_putc(struct limine_framebuffer *fb, char ch)
+{
+    if (ch == '\r')
+        return;
+
+    if (ch == '\n') {
+        console_newline(fb);
+        return;
+    }
+
+    if (ch == '\b') {
+        if (console_x > console_start_x) {
+            console_x -= CONSOLE_CHAR_W;
+            console_clear_cell(fb);
+        }
+        return;
+    }
+
+    console_draw_char(fb, ch);
+    console_x += CONSOLE_CHAR_W;
+
+    if (console_x + CONSOLE_CHAR_W >= console_max_x)
+        console_newline(fb);
 }
 
 void itsib_main(void) {
@@ -265,8 +432,17 @@ void itsib_main(void) {
     serial_write_hex(hhdm->offset);
     (void)serial_write("\r\n");
 
+    __asm__ volatile ("cli" ::: "memory");
+
     gdt_init();
     idt_init();
+
+    idt_register_handler(32, timer_irq_stub);
+    idt_register_handler(33, keyboard_irq_stub);
+    timer_init();
+    keyboard_init();
+
+    (void)serial_write("TIMER: PIT initialized at 100 Hz.\r\n");
 
     struct limine_memmap_response *memmap =
         memmap_request.response;
@@ -678,5 +854,46 @@ void itsib_main(void) {
         for (;;) __asm__ volatile ("hlt");
     }
 
-    for (;;) __asm__ volatile ("hlt");
+        /* Enable hardware interrupts and verify PIT timer delivery. */
+    __asm__ volatile ("sti" ::: "memory");
+
+    uint64_t start_ticks = timer_get_ticks();
+    uint64_t target_ticks = start_ticks + 5;
+
+    while (timer_get_ticks() < target_ticks) {
+        __asm__ volatile ("hlt" ::: "memory");
+    }
+
+    (void)serial_write("TIMER: 5 ticks received successfully!\r\n");
+
+    /* Print received keyboard characters to the serial console. */
+    (void)serial_write("KEYBOARD: Press keys in the QEMU window.\r\n");
+
+    console_start_x = 24;
+    console_start_y = fb->height / 2 + 80;
+    console_x = console_start_x;
+    console_y = console_start_y;
+    console_max_x = fb->width - 24;
+    console_max_y = fb->height - 16;
+
+    (void)serial_write("KEYBOARD: Framebuffer console ready.\r\n");
+
+    for (;;) {
+        char key;
+
+        if (keyboard_getchar(&key)) {
+            console_putc(fb, key);
+
+            if (key == '\n') {
+                (void)serial_write("\r\n");
+            } else if (key == '\b') {
+                (void)serial_write("\b \b");
+            } else {
+                char output[2] = { key, '\0' };
+                (void)serial_write(output);
+            }
+        } else {
+            __asm__ volatile ("sti; hlt" ::: "memory");
+        }
+    }
 }
