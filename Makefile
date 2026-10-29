@@ -20,8 +20,8 @@ all: iso
 
 build: $(KERNEL)
 
-$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/shell.o kernel/memory.o kernel/linker.ld
-	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/shell.o kernel/memory.o
+$(KERNEL): kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/shell.o kernel/memory.o kernel/task.o kernel/linker.ld
+	$(LD) $(LDFLAGS) -o $@ kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/shell.o kernel/memory.o kernel/task.o
 
 kernel/main.o: kernel/src/main.c
 	$(CC) -c $< -o $@ $(CFLAGS)
@@ -55,6 +55,9 @@ kernel/shell.o: kernel/src/shell.c kernel/src/shell.h
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 kernel/memory.o: kernel/src/memory.c kernel/src/memory.h
+	$(CC) -c $< -o $@ $(CFLAGS)
+
+kernel/task.o: kernel/src/task.c kernel/src/task.h kernel/src/kheap.h
 	$(CC) -c $< -o $@ $(CFLAGS)
 
 kernel/pmm.o: kernel/src/pmm.c kernel/src/pmm.h
@@ -92,5 +95,5 @@ check-tools:
 	@command -v qemu-system-x86_64
 
 clean:
-	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/shell.o kernel/memory.o $(KERNEL) $(ISO)
+	rm -f kernel/main.o kernel/gdt.o kernel/gdt_flush.o kernel/idt.o kernel/idt_load.o kernel/pmm.o kernel/kheap.o kernel/vmm.o kernel/timer.o kernel/timer_irq.o kernel/keyboard.o kernel/keyboard_irq.o kernel/shell.o kernel/memory.o kernel/task.o $(KERNEL) $(ISO)
 	rm -f $(ISO_ROOT)/boot/itsib-kernel.elf

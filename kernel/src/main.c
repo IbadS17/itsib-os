@@ -10,6 +10,12 @@
 #include "timer.h"
 #include "keyboard.h"
 #include "shell.h"
+#include "task.h"
+
+static void task_test_entry(void)
+{
+    for (;;) __asm__ volatile ("hlt");
+}
 
 extern void timer_irq_stub(void);
 extern void keyboard_irq_stub(void);
@@ -859,6 +865,42 @@ void itsib_main(void) {
 
         (void)serial_write("\r\n");
     }
+
+    /* Initialize task registry after the kernel heap tests. */
+    task_init();
+    (void)serial_write("TASK: Registry initialized.\r\n");
+    (void)serial_write("TASK: Initial task count: ");
+    serial_write_hex(task_count());
+    (void)serial_write("\r\n");
+
+    (void)serial_write("TASK: PMM free pages before creation: ");
+    serial_write_hex(pmm_get_free_pages());
+    (void)serial_write("\\r\\n");
+
+    int test_task_id = task_create(task_test_entry);
+    const task_t *test_task = task_get(0);
+
+    if (test_task_id <= 0) {
+        (void)serial_write("TASK: Creation failed, code: ");
+        serial_write_hex((uint64_t)(-test_task_id));
+        (void)serial_write("\r\n");
+        for (;;) __asm__ volatile ("hlt");
+    }
+    kernel_assert(task_count() == 1, "TASK test: incorrect task count");
+    kernel_assert(test_task != 0, "TASK test: task record missing");
+    kernel_assert(test_task->id == (uint64_t)test_task_id,
+                  "TASK test: incorrect task ID");
+    kernel_assert(test_task->state == TASK_READY,
+                  "TASK test: task is not READY");
+    kernel_assert(test_task->stack != 0,
+                  "TASK test: stack allocation failed");
+    kernel_assert(test_task->stack_size == TASK_STACK_SIZE,
+                  "TASK test: incorrect stack size");
+
+    (void)serial_write("TASK: Creation test passed.\r\n");
+    (void)serial_write("TASK: Stack size: ");
+    serial_write_hex(test_task->stack_size);
+    (void)serial_write("\r\n");
 
     if (!serial_write("\r\nItsIB OS: kernel entered successfully!\r\n")) {
         for (;;) __asm__ volatile ("hlt");
