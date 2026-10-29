@@ -30,5 +30,20 @@ bool vmm_is_initialized(void);
 uint64_t vmm_get_pml4_physical(void);
 
 bool vmm_get_pte(uint64_t virtual_address, uint64_t *entry_out);
+bool vmm_map_page(
+    uint64_t virtual_address,
+    uint64_t physical_address,
+    uint64_t flags
+);
+
+bool vmm_unmap_page(
+    uint64_t virtual_address,
+    uint64_t *physical_address_out
+);
+
+bool vmm_translate(
+    uint64_t virtual_address,
+    uint64_t *physical_address_out
+);
 
 #endif

@@ -265,6 +265,17 @@ void itsib_main(void) {
     serial_write_hex(hhdm->offset);
     (void)serial_write("\r\n");
 
+    gdt_init();
+    idt_init();
+
+    struct limine_memmap_response *memmap =
+        memmap_request.response;
+
+    if (!memmap) {
+        (void)serial_write("ERROR: Limine provided no memory map.\r\n");
+        kernel_panic("Memory map unavailable");
+    }
+    pmm_init(memmap, hhdm->offset);
     if (!vmm_init(hhdm->offset, pml4_physical)) {
         kernel_panic("VMM initialization failed");
     }
@@ -281,18 +292,6 @@ void itsib_main(void) {
     (void)serial_write("VMM: Kernel mapping verified! Entry: 0x");
     serial_write_hex(kernel_page_entry);
     (void)serial_write("\r\n");
-
-    gdt_init();
-    idt_init();
-
-    struct limine_memmap_response *memmap =
-        memmap_request.response;
-
-    if (!memmap) {
-        (void)serial_write("ERROR: Limine provided no memory map.\r\n");
-        kernel_panic("Memory map unavailable");
-    }
-    pmm_init(memmap, hhdm->offset);
     uint64_t initial_free_pages = pmm_get_free_pages();
 
     kernel_assert(initial_free_pages == pmm_get_usable_pages(),
@@ -376,6 +375,59 @@ void itsib_main(void) {
                   "HHDM test: freeing page failed");
 
     (void)serial_write("PMM: HHDM page read/write test passed!\r\n");
+    (void)serial_write("VMM: Running page mapping tests...\r\n");
+
+    const uint64_t vmm_test_address = 0xFFFFC00000000000ULL;
+    uint64_t vmm_test_physical = pmm_alloc_page();
+
+    kernel_assert(vmm_test_physical != 0,
+                  "VMM test: physical page allocation failed");
+
+    uint64_t existing_translation = 0;
+
+    kernel_assert(!vmm_translate(vmm_test_address,
+                                 &existing_translation),
+                  "VMM test: test virtual address is already mapped");
+
+    volatile uint64_t *vmm_test_virtual =
+        (volatile uint64_t *)vmm_test_address;
+
+    kernel_assert(vmm_map_page(vmm_test_address,
+                               vmm_test_physical,
+                               VMM_PAGE_WRITABLE),
+                  "VMM test: mapping creation failed");
+
+    uint64_t translated_physical = 0;
+
+    kernel_assert(vmm_translate(vmm_test_address,
+                                &translated_physical),
+                  "VMM test: address translation failed");
+
+    kernel_assert(translated_physical == vmm_test_physical,
+                  "VMM test: physical translation mismatch");
+
+    *vmm_test_virtual = 0x4954534942564D4DULL;
+
+    kernel_assert(*vmm_test_virtual == 0x4954534942564D4DULL,
+                  "VMM test: mapped memory read/write failed");
+
+    uint64_t unmapped_physical = 0;
+
+    kernel_assert(vmm_unmap_page(vmm_test_address,
+                                 &unmapped_physical),
+                  "VMM test: unmapping failed");
+
+    kernel_assert(unmapped_physical == vmm_test_physical,
+                  "VMM test: unmap returned incorrect physical address");
+
+    kernel_assert(!vmm_translate(vmm_test_address,
+                                 &existing_translation),
+                  "VMM test: translation succeeded after unmapping");
+
+    kernel_assert(pmm_free_page(vmm_test_physical),
+                  "VMM test: physical page cleanup failed");
+
+    (void)serial_write("VMM: Page mapping tests passed!\r\n");
     (void)serial_write("KHEAP: Initializing kernel heap...\r\n");
 
     kernel_assert(kheap_init(hhdm->offset),
